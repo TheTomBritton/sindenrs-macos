@@ -636,3 +636,21 @@ now.
    aim, trigger, pedal, coin; quit from the menu (the border should vanish at once).
 4. If the HID model holds, make `gun` the default and retire the synthesis to a fallback; the
    permission story becomes Camera only.
+
+## 2026-10-25 — the write wedge was the unpaced button map
+
+The overnight bench sequence, run at last: `bench-wedge.sh gun` WEDGED, `gun norecoil`
+WEDGED, and a new `--camera-first` (camera streaming before the gun is brought up) WEDGED. Then
+the baseline the bisect rested on fell over: `debug monitor`, no camera at all, wedged 0.6 s
+into streaming, and kept doing so (6 of 6, gun on a USB extender and direct alike). One run
+with `RUST_LOG=sindenrs=trace` streamed clean, which pointed at timing: the 41 button-map
+frames go out in ~2 ms and the output queue backs up behind the gun's 64-byte CDC endpoint.
+With 2 ms after each frame, `monitor` streamed clean 4 of 4 (600 positions each) and both
+`bench-wedge.sh gun` and `driver` came back CLEAN with the camera in-process. Fixed in
+65e3588. Byte loss in the burst is the likely mechanism (the map's data bytes include 109/110,
+the auth commands that wedge the firmware when they arrive without their payload); not proven.
+
+`sindenrs gun reset` recovers a wedged gun most of the time, which makes bisecting cheap; once
+in a while it leaves the MCU off the bus and only a replug helps. Still to verify by hand:
+buttons and pump in `run` with the gun in use, and whether `cursor = "gun"` should become the
+default now that the HID pointer can be fed.
