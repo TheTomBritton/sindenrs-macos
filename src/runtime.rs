@@ -89,6 +89,10 @@ pub struct TrackerOptions {
     /// moves the cursor — a synthesised cursor always does. For bench runs, so a hands-free
     /// session exercises the serial writes the way `run` does with the gun in use.
     pub heartbeat: bool,
+    /// Bring the gun up ([`prepare_gun`], with this recoil gap) only once the camera is
+    /// streaming, instead of the caller doing it first. The gun passed in is then
+    /// authenticated but not yet configured, and its stored bore offset is read here.
+    pub prepare_after_camera: Option<Duration>,
 }
 
 /// One processed frame, handed to the caller's hook.
@@ -305,6 +309,12 @@ pub fn run_tracker_with(
 ) -> Result<()> {
     crate::activity::interactive_thread();
     let cam = Camera::open(camera, &opts.display)?;
+    let mut frames = cam.start(opts.buffers, camera)?;
+    let mut eeprom_cal = None;
+    if let (Some(gap), Some((g, gc))) = (opts.prepare_after_camera, gun.as_mut()) {
+        eeprom_cal = prepare_gun(g, gc, gap)?;
+        info!("[{name}] gun streaming (brought up after the camera)");
+    }
     let (w, h) = cam.size();
     let d = &opts.display;
     let threshold = opts.threshold.unwrap_or(d.threshold);
@@ -318,7 +328,7 @@ pub fn run_tracker_with(
     });
     // No gun queries here: by now the gun is streaming (see `prepare_gun`, which read the
     // EEPROM offset for the caller to pass in `opts`); the config's value is the fallback.
-    let cal = gun.as_ref().and_then(|(_, gc)| gc.calibration);
+    let cal = gun.as_ref().and_then(|(_, gc)| gc.calibration).or(eeprom_cal);
     let cal_x = opts.cal_x.or(cal.map(|c| c[0])).unwrap_or(0.0);
     let cal_y = opts.cal_y.or(cal.map(|c| c[1])).unwrap_or(0.0);
     // The bore offset lives in the camera's frame, so it must go through the same flip as the
@@ -359,7 +369,6 @@ pub fn run_tracker_with(
         csv = Some(f);
     }
 
-    let mut frames = cam.start(opts.buffers, camera)?;
     let start = Instant::now();
     let mut n = 0u32;
     let mut found = 0u64;

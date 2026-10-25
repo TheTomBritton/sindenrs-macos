@@ -408,6 +408,9 @@ struct TrackArgs {
     /// moves the cursor, so a hands-free bench run exercises the serial writes.
     #[arg(long, hide = true)]
     heartbeat: bool,
+    /// With --send: bring the gun up only once the camera is streaming, for bisecting.
+    #[arg(long, hide = true)]
+    camera_first: bool,
     /// With --send on macOS: mask the gun's HID mouse buttons or not (default: masked when
     /// the driver moves the cursor). For bisecting the serial-write wedge.
     #[arg(long, hide = true)]
@@ -2045,6 +2048,7 @@ fn track(ctx: &Ctx, a: TrackArgs) -> Result<()> {
     let mut name = "track".to_owned();
     let mut eeprom_cal = None;
     let cursor = a.cursor.map_or(ctx.cfg.global.cursor, Into::into);
+    let camera_first = a.camera_first;
     if a.send {
         let port = select_port(ctx)?;
         let mut g = connect(&port, ctx.cfg.global.auto_recover)?;
@@ -2063,11 +2067,13 @@ fn track(ctx: &Ctx, a: TrackArgs) -> Result<()> {
         {
             gc.buttons.mask_synthesised();
         }
-        eeprom_cal = sindenrs::runtime::prepare_gun(&mut g, &gc, ctx.cfg.recoil_gap())?;
-        info!(
-            "gun \"{}\" streaming (joystick={}, recoil={})",
-            gc.name, gc.joystick, gc.recoil.enabled
-        );
+        if !camera_first {
+            eeprom_cal = sindenrs::runtime::prepare_gun(&mut g, &gc, ctx.cfg.recoil_gap())?;
+            info!(
+                "gun \"{}\" streaming (joystick={}, recoil={})",
+                gc.name, gc.joystick, gc.recoil.enabled
+            );
+        }
         name.clone_from(&gc.name);
         gun = Some((g, gc));
     }
@@ -2112,6 +2118,7 @@ fn track(ctx: &Ctx, a: TrackArgs) -> Result<()> {
         aim_map: sindenrs::runtime::AimMap::default(),
         cursor,
         heartbeat: a.heartbeat,
+        prepare_after_camera: camera_first.then(|| ctx.cfg.recoil_gap()),
     };
     let status = Arc::new(Mutex::new(Status::default()));
     if a.preview {
@@ -2545,6 +2552,7 @@ fn supervise_guns(
                 aim_map,
                 cursor: ctx.cfg.global.cursor,
                 heartbeat: false,
+                prepare_after_camera: None,
             };
             let status = Arc::new(Mutex::new(Status {
                 name: gc.name.clone(),
@@ -3204,6 +3212,7 @@ fn calibrate(ctx: &Ctx, a: CalibrateArgs) -> Result<()> {
         aim_map,
         cursor: ctx.cfg.global.cursor,
         heartbeat: false,
+        prepare_after_camera: None,
     };
 
     let scene = Arc::new(Mutex::new(Scene {

@@ -11,6 +11,7 @@
 #   masked / unmasked   override whether the gun's HID mouse buttons are masked (default:
 #           masked for driver, unmasked for gun)
 #   norecoil  leave recoil disabled on the gun, as `debug monitor` (which streams clean) does
+#   camfirst  start the camera streaming before the gun is configured and streaming
 #
 # The gun can lie on the desk; no border is needed. Build first (cargo build). Replug the gun
 # after any WEDGED run before the next one: a wedged gun stays wedged. SINDEN_CAMERA=<uniqueID>
@@ -19,7 +20,7 @@
 set -eu
 here=$(cd "$(dirname "$0")" && pwd)
 root=$(cd "$here/../.." && pwd)
-usage="usage: bench-wedge.sh gun|driver [masked|unmasked] [norecoil]"
+usage="usage: bench-wedge.sh gun|driver [masked|unmasked] [norecoil] [camfirst]"
 cursor=${1:?$usage}
 case "$cursor" in gun|driver) ;; *) echo "$usage" >&2; exit 2;; esac
 shift
@@ -30,6 +31,7 @@ for opt in "$@"; do
         masked) flags="$flags --mask-buttons true" ;;
         unmasked) flags="$flags --mask-buttons false" ;;
         norecoil) flags="$flags --no-recoil" ;;
+        camfirst) flags="$flags --camera-first" ;;
         *) echo "$usage" >&2; exit 2 ;;
     esac
     tag="$tag-$opt"
