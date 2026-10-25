@@ -127,6 +127,12 @@ pub struct Gun {
     last_auth: Option<AuthReport>,
 }
 
+/// Pause after each button-map frame in [`Gun::apply_config`]. Sent back to back (41 frames in
+/// ~2 ms) the burst backs up in the gun's CDC buffer, and on macOS the firmware then stops
+/// reading its port within a second of streaming; 2 ms apart it streams clean (2026-10-25:
+/// unpaced 6 of 6 wedged, paced 4 of 4 clean for 10 s, gun direct and on an extender alike).
+const CONFIG_FRAME_GAP: Duration = Duration::from_millis(2);
+
 impl Gun {
     /// Open the gun's CDC-ACM port: 115200 8N1, no flow control, DTR and RTS asserted.
     pub fn open(path: &str) -> Result<Self> {
@@ -488,6 +494,7 @@ impl Gun {
             .map_err(|e| GunError::Config(e.to_string()))?;
         for f in &frames {
             self.send(*f)?;
+            std::thread::sleep(CONFIG_FRAME_GAP);
         }
         debug!(n = frames.len(), "button map sent");
         self.send_recoil_burst(&cfg.recoil, recoil_gap)?;
