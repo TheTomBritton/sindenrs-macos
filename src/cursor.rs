@@ -93,6 +93,11 @@ fn accessibility_trusted() -> bool {
     unsafe { AXIsProcessTrustedWithOptions(options.as_concrete_TypeRef()) != 0 }
 }
 
+/// Height of the menu bar on a display without a notch, in points. The synthesised cursor never
+/// goes above it (see [`Cursor::move_to`]); this is a constant rather than an AppKit query
+/// because the cursor is driven from the tracker thread, and AppKit wants the main thread.
+const MENU_BAR_POINTS: f64 = 25.0;
+
 /// Moves the macOS system cursor and drives its left button, in the screen's global
 /// coordinate space (points, top-left origin — the space Core Graphics mouse events use and
 /// the space [`crate::runtime::AimMap`] already produces percentages of).
@@ -161,9 +166,12 @@ impl Cursor {
     /// Place the cursor at `x`/`y` percent of the screen (0..100, the output of
     /// [`crate::runtime::AimMap::apply`]). Moves while the trigger is held are posted as drags.
     pub fn move_to(&mut self, x_percent: f64, y_percent: f64) -> Result<()> {
+        // The top strip is kept clear: a cursor pinned to y=0 (the gun aimed above the screen)
+        // reveals the menu bar over a fullscreen game, and a trigger pull there opens a menu
+        // whose tracking loop then holds the pointer until a real mouse click dismisses it.
         let point = CGPoint::new(
             (x_percent / 100.0 * self.width).clamp(0.0, self.width - 1.0),
-            (y_percent / 100.0 * self.height).clamp(0.0, self.height - 1.0),
+            (y_percent / 100.0 * self.height).clamp(MENU_BAR_POINTS, self.height - 1.0),
         );
         self.last = point;
         // Warp first so the visible cursor tracks even without the Accessibility grant, then
