@@ -377,6 +377,10 @@ pub fn run_tracker_with(
     let mut age_n = 0u32;
     let mut last_report = Instant::now();
     let mut last_aim: Option<[f64; 2]> = None;
+    // Consecutive frames without a usable aim, and whether the synthesised cursor has been parked
+    // off-screen for this spell (see PARK_AFTER_FRAMES).
+    let mut unaimed = 0u32;
+    let mut parked = false;
     let mut last_quad: Option<Quad> = None;
     let mut guard = JumpGuard::new(opts.jump_limit);
     let mut corrupt = 0u64;
@@ -541,7 +545,25 @@ pub fn run_tracker_with(
         }
         if aim.is_some() {
             last_aim = aim;
+            unaimed = 0;
+            parked = false;
+        } else if raw_aim.is_none() {
+            // No aim at all (not merely one the guard held): the border is out of view, off the
+            // edge of the camera's range, or only a hull. Once that lasts, the gun is pointed
+            // away — park the synthesised cursor off-screen so the next shot reloads instead of
+            // landing at the last on-screen aim.
+            unaimed = unaimed.saturating_add(1);
+            #[cfg(target_os = "macos")]
+            if unaimed >= PARK_AFTER_FRAMES && !parked {
+                if let Some(c) = cursor.as_mut() {
+                    c.park_offscreen()?;
+                    c.release();
+                }
+                parked = true;
+            }
         }
+        #[cfg(not(target_os = "macos"))]
+        let _ = parked;
         let proc = t0.elapsed();
         proc_sum += proc;
         if let Some(age) = frame.age {
@@ -711,6 +733,12 @@ struct Writes {
 ///
 /// With a synthesised macOS cursor ([`crate::cursor`]) positions are still streamed to the
 /// gun: firmware 1.9 emits button reports only while position traffic flows.
+/// Frames without any aim before the synthesised cursor is parked off-screen: long enough that a
+/// one-frame hull fallback mid-aim never fires a stray reload, short enough (~70 ms at 60 fps) for
+/// a quick swing off the screen and back.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+const PARK_AFTER_FRAMES: u32 = 4;
+
 fn send_position(gun: &mut Gun, x: f64, y: f64, writes: &mut Writes) -> crate::gun::Result<()> {
     let t = Instant::now();
     let r = gun.set_position(percent_to_axis(x), percent_to_axis(y));

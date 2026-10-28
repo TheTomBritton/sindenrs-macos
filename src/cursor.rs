@@ -98,6 +98,10 @@ fn accessibility_trusted() -> bool {
 /// because the cursor is driven from the tracker thread, and AppKit wants the main thread.
 const MENU_BAR_POINTS: f64 = 25.0;
 
+/// How far the cursor stays above the bottom edge while aiming on screen, in points. The bottom
+/// pixel reveals the Dock over a fullscreen game, where a shot would launch whatever it hits.
+const DOCK_EDGE_POINTS: f64 = 4.0;
+
 /// Moves the macOS system cursor and drives its left button, in the screen's global
 /// coordinate space (points, top-left origin — the space Core Graphics mouse events use and
 /// the space [`crate::runtime::AimMap`] already produces percentages of).
@@ -166,13 +170,40 @@ impl Cursor {
     /// Place the cursor at `x`/`y` percent of the screen (0..100, the output of
     /// [`crate::runtime::AimMap::apply`]). Moves while the trigger is held are posted as drags.
     pub fn move_to(&mut self, x_percent: f64, y_percent: f64) -> Result<()> {
-        // The top strip is kept clear: a cursor pinned to y=0 (the gun aimed above the screen)
-        // reveals the menu bar over a fullscreen game, and a trigger pull there opens a menu
-        // whose tracking loop then holds the pointer until a real mouse click dismisses it.
-        let point = CGPoint::new(
-            (x_percent / 100.0 * self.width).clamp(0.0, self.width - 1.0),
-            (y_percent / 100.0 * self.height).clamp(MENU_BAR_POINTS, self.height - 1.0),
-        );
+        // Aimed above or below the screen: off-screen, which is a side edge (below). Otherwise the
+        // top strip is kept clear — a cursor pinned to y=0 reveals the menu bar over a fullscreen
+        // game, and a trigger pull there opens a menu whose tracking loop then holds the pointer
+        // until a real mouse click dismisses it — and the bottom pixel likewise (the Dock).
+        let point = if !(0.0..=100.0).contains(&y_percent) {
+            self.offscreen_point(x_percent < 50.0)
+        } else {
+            CGPoint::new(
+                (x_percent / 100.0 * self.width).clamp(0.0, self.width - 1.0),
+                (y_percent / 100.0 * self.height)
+                    .clamp(MENU_BAR_POINTS, self.height - DOCK_EDGE_POINTS),
+            )
+        };
+        self.place(point)
+    }
+
+    /// Where an off-screen shot goes: the outermost column on the given side, halfway down. The
+    /// games read a position on the screen's very edge as off-screen (that is how a reload shot
+    /// works), and the side edges are the only ones with no menu bar or Dock to click into.
+    fn offscreen_point(&self, left: bool) -> CGPoint {
+        let x = if left { 0.0 } else { self.width - 1.0 };
+        CGPoint::new(x, self.height / 2.0)
+    }
+
+    /// Put the cursor off-screen on the side it was last nearer to, so a trigger pull with the gun
+    /// pointed away from the screen is an off-screen shot rather than one at the last aim. Called
+    /// once the border has been out of view for a moment; the cursor is shown again (released)
+    /// right after, so the trackpad is not pinned.
+    pub fn park_offscreen(&mut self) -> Result<()> {
+        let point = self.offscreen_point(self.last.x < self.width / 2.0);
+        self.place(point)
+    }
+
+    fn place(&mut self, point: CGPoint) -> Result<()> {
         self.last = point;
         // Warp first so the visible cursor tracks even without the Accessibility grant, then
         // post the move so a trusted app receives it as a real event.
